@@ -1,0 +1,806 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Take it Easy – Spielmodus + Widescreen‑Palette (6×5) + Glow</title>
+
+<style>
+:root{
+  --bg:#0f1020; --panel:#121426; --grid:#6d78a8; --text:#e8eaf6; --accent:#6ec1ff;
+  --highlight:#9ad1ff; --ok:#36d16f; --bad:#ff5a5a; --border:#2f3564;
+}
+html, body{
+  height:100%; margin:0; overflow:hidden; background:var(--bg); color:var(--text);
+  font:14px/1.45 system-ui, Segoe UI, Roboto, Arial, sans-serif;
+}
+.wrap{
+  height:100vh; width:100vw; padding:16px; display:flex; gap:16px; box-sizing:border-box; overflow:hidden;
+}
+
+/* LEFT: widescreen palette (ensure 6 columns fit) */
+.left { flex:0 0 clamp(760px, 48vw, 1100px); min-height:0; display:flex; flex-direction:column; overflow:hidden; }
+.right { flex:1 1 auto; min-width:0; min-height:0; display:flex; flex-direction:column; overflow:hidden; }
+
+.panel{
+  background:var(--panel); border:1px solid #1b1f39; border-radius:12px; padding:12px; box-sizing:border-box;
+}
+h1{ font-size:18px; margin:0 0 8px; }
+.row{ display:flex; align-items:center; gap:8px; }
+button{
+  background:#1d2140; color:var(--text);
+  border:1px solid var(--border); border-radius:10px; padding:10px 14px; cursor:pointer;
+}
+button:hover{ border-color:var(--accent); }
+.footer{ opacity:.75; font-size:12px; }
+.warn{ color:#ffdf80; font-size:12px; margin-top:6px; }
+
+/* ---------- Palette ---------- */
+.panel.palette{ flex:1 1 auto; min-height:0; display:flex; flex-direction:column; overflow:hidden; }
+#paletteHeader{ display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px; }
+
+#palette{
+  flex:1 1 auto; min-height:0; overflow:auto;
+  display:grid;
+  grid-template-columns: repeat(6, 1fr); /* exactly 6 tiles per row */
+  gap:10px;
+  padding-bottom:8px;
+}
+
+.tileBtn{
+  position:relative;
+  border:1px solid var(--border); border-radius:12px; background:#0b0e1f;
+  display:flex; flex-direction:column; align-items:center; justify-content:flex-start;
+  padding:6px 6px 26px 6px; cursor:grab; user-select:none;
+}
+.tileBtn:active{ cursor:grabbing; }
+
+/* smaller preview to fit 6×5 comfortably */
+.tilePreview canvas{ width:95px; height:auto; display:block; }
+
+/* Status badge (bottom-left, NOT overlapping the preview) */
+.tileStatus{
+  position:absolute; bottom:4px; left:8px;
+  display:flex; align-items:center; gap:5px; pointer-events:none;
+  font:700 13px ui-monospace;
+}
+.tileStatus .dot{ width:10px; height:10px; border-radius:50%; }
+.tileStatus.ok .dot{ background:var(--ok); }
+.tileStatus.bad .dot{ background:var(--bad); }
+.tileStatus.ok .label{ color:var(--ok); }
+.tileStatus.bad .label{ color:var(--bad); }
+
+/* Strong, animated glow for the current tile */
+.tileBtn.current{
+  border-color:#6ec1ff;
+  box-shadow: 0 0 10px 3px rgba(110,193,255,0.60), 0 0 22px 8px rgba(110,193,255,0.35) inset;
+  animation: tileGlowPulse 1.4s ease-in-out infinite;
+}
+@keyframes tileGlowPulse{
+  0% { box-shadow:0 0 8px 2px rgba(110,193,255,0.5), 0 0 18px 6px rgba(110,193,255,0.28) inset; }
+  50%{ box-shadow:0 0 16px 6px rgba(110,193,255,0.95),0 0 28px 10px rgba(110,193,255,0.5) inset; }
+  100%{box-shadow:0 0 8px 2px rgba(110,193,255,0.5), 0 0 18px 6px rgba(110,193,255,0.28) inset; }
+}
+
+/* ---------- Board ---------- */
+.panel.board{ position:relative; flex:1 1 auto; min-height:0; display:flex; flex-direction:column; overflow:hidden; }
+#boardContainer{ position:relative; flex:1 1 auto; display:flex; justify-content:center; align-items:center; min-width:640px; min-height:540px; overflow:hidden; }
+#boardCanvas{ width:100%; height:100%; border-radius:12px; background:linear-gradient(180deg,#0f1125,#0b0d1c); border:1px solid #1b1f39; user-select:none; touch-action:none; }
+
+/* Button zentriert oben */
+.board-controls{
+  position:absolute;
+  top:10px;
+  left:50%;
+  transform:translateX(-50%);
+  z-index:3000;
+}
+#nextBtn{
+  font-size:17px; padding:10px 16px;
+  background:#213060; border:2px solid #4fa2ff; border-radius:8px;
+}
+
+/* Status message */
+#status{
+  position:fixed; top:10px; right:10px; z-index:10000;
+  background:rgba(0,0,0,0.65); padding:6px 10px; border-radius:8px;
+  color:#cfe3ff; font:12px ui-monospace; white-space:pre-line; pointer-events:none;
+}
+.badge{ display:inline-block; background:#1d2140; border:1px solid var(--border); padding:2px 6px; border-radius:6px; }
+#sizeRange{ width:180px; }
+</style>
+</head>
+<body>
+<div id="status">Bereit</div>
+
+<div class="wrap">
+  <!-- LEFT: palette -->
+  <div class="left">
+    <div class="panel palette">
+      <div id="paletteHeader">
+        <h1>Alle Tiles (27)</h1>
+        <div class="row">
+          <div>Aktuelles Tile: <span id="currentTileLabel" class="badge">–</span></div>
+          <div>Runde: <span id="roundLabel" class="badge">1 / 19</span></div>
+        </div>
+        <div class="row" style="margin-left:auto;">
+          <label for="sizeRange">Tile‑Höhe (Board):</label>
+          <input id="sizeRange" type="range" min="70" max="260" value="120" />
+          <span id="sizeVal">120px</span>
+        </div>
+      </div>
+
+      <div id="palette"></div>
+      <div id="warnBox" class="warn" style="display:none;"></div>
+
+      <div class="footer" style="margin-top:6px;">
+        • Palette: Ziehe das <b>aktuelle</b> Tile aufs Board<br/>
+        • „Zug abgeschlossen“ fixiert das Tile<br/>
+        • Rechtsklick: aktuelles (nicht fixiertes) Tile löschen
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT: board -->
+  <div class="right">
+    <div class="panel board">
+      <h1>Spielfeld — <span id="boardInfo"></span></h1>
+
+      <div class="board-controls">
+        <button id="nextBtn" title="Zug abschließen, Tile fixieren und nächstes ziehen">Zug abgeschlossen</button>
+      </div>
+
+      <div id="boardContainer">
+        <canvas id="boardCanvas"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ===== DOM ===== */
+const statusEl = document.getElementById('status');
+const paletteEl = document.getElementById('palette');
+const warnBox = document.getElementById('warnBox');
+const sizeRange = document.getElementById('sizeRange');
+const sizeVal = document.getElementById('sizeVal');
+const nextBtn = document.getElementById('nextBtn');
+const infoSpan = document.getElementById('boardInfo');
+const container = document.getElementById('boardContainer');
+const canvas = document.getElementById('boardCanvas');
+const ctx = canvas.getContext('2d');
+const lblCurrent = document.getElementById('currentTileLabel');
+const lblRound = document.getElementById('roundLabel');
+
+/* ===== Board ===== */
+const radius = 2; // 19 Felder
+const cells = [];
+for (let q=-radius; q<=radius; q++){
+  for (let s=-radius; s<=radius; s++){
+    const r = -q - s;
+    if (Math.max(Math.abs(q),Math.abs(r),Math.abs(s)) <= radius) cells.push({ q, r, name:null });
+  }
+}
+if (infoSpan) infoSpan.textContent = `Radius ${radius} ⇒ ${cells.length} Felder`;
+
+/* ===== View/Geom ===== */
+let uiTileH = parseInt(sizeRange.value,10);
+let view = { dpr:1, minx:0, miny:0, W:0, H:0, scale:1, offX:0, offY:0 };
+let fitLock = null;
+const dragState = { active:false, source:null, name:null, fromIdx:-1, pointerCssX:0, pointerCssY:0 };
+
+function hexToPixel(q,r){
+  const s = uiTileH/Math.sqrt(3);
+  const x = (3/2)*s*q;
+  const y = (Math.sqrt(3)*s)*(r+q/2);
+  return { x,y,s };
+}
+function getBounds(){
+  const xs=[], ys=[];
+  for (const c of cells){ const p=hexToPixel(c.q,c.r); xs.push(p.x); ys.push(p.y); }
+  const pad=40;
+  const minx=Math.min(...xs)-pad, maxx=Math.max(...xs)+pad;
+  const miny=Math.min(...ys)-pad, maxy=Math.max(...ys)+pad;
+  return { minx,miny,W:maxx-minx,H:maxy-miny };
+}
+function resizeCanvas(){
+  const dpr = Math.max(1, window.devicePixelRatio || 1);
+  let rect = container.getBoundingClientRect();
+  if (rect.width < 10 || rect.height < 10) rect = { width: 900, height: 700 };
+  const cssW = Math.max(1, Math.floor(rect.width));
+  const cssH = Math.max(1, Math.floor(rect.height));
+  canvas.width  = Math.floor(cssW * dpr);
+  canvas.height = Math.floor(cssH * dpr);
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  view.dpr = dpr;
+  return { cssW, cssH };
+}
+
+/* ===== Assets (Spritesheet) ===== */
+const SHEET_IMG = 'spritesheet_9x3.png';
+const SHEET_JSON = 'spritesheet_9x3.json';
+let assets = { ready:false, image:null, frames:null, suffix:'' };
+
+function normalizeFrames(json){
+  if (!json) return {};
+  if (json.frames && !Array.isArray(json.frames)) return json.frames;
+  if (Array.isArray(json.frames)){
+    const map={};
+    for (const it of json.frames){
+      const k=(it.filename || it.name || '')+'';
+      if (!k || !it.frame) continue;
+      map[k] = {
+        frame: it.frame,
+        spriteSourceSize: it.spriteSourceSize || null,
+        sourceSize: it.sourceSize || null,
+        rotated: it.rotated || false,
+        trimmed: it.trimmed || false
+      };
+    }
+    return map;
+  }
+  return json;
+}
+function detectSuffix(framesObj){
+  const keys = Object.keys(framesObj || {});
+  if (!keys.length) return '';
+  return keys.some(k=>k.endsWith('.png')) ? '.png' : '';
+}
+function tryFrame(name){
+  if (!assets.frames) return null;
+  if (assets.frames[name]) return assets.frames[name];
+  if (name.endsWith('.png')){
+    const base=name.slice(0,-4);
+    if (assets.frames[base]) return assets.frames[base];
+  } else {
+    if (assets.frames[name+'.png']) return assets.frames[name+'.png'];
+  }
+  return null;
+}
+function loadImage(src){
+  return new Promise((res,rej)=>{ const im=new Image(); im.onload=()=>res(im); im.onerror=rej; im.src=src; });
+}
+async function enableSprites(){
+  try{
+    const [img, json] = await Promise.all([
+      loadImage(SHEET_IMG),
+      fetch(SHEET_JSON).then(r=>{ if(!r.ok) throw new Error('JSON '+r.status); return r.json(); })
+    ]);
+    const frames = normalizeFrames(json);
+    const suffix = detectSuffix(frames);
+    assets = { ready:true, image:img, frames, suffix };
+    warnBox.style.display='none';
+    buildPalette(true);
+    refreshCurrentTileVisuals();
+    draw();
+  }catch(e){
+    assets = { ready:false, image:null, frames:null, suffix:'' };
+    warnBox.textContent = 'Spritesheet/JSON nicht gefunden — Platzhalter aktiv.';
+    warnBox.style.display='block';
+    buildPalette(false);
+    refreshCurrentTileVisuals();
+    draw();
+  }
+}
+
+/* ===== Zeichnen Board ===== */
+function draw(){
+  const { cssW, cssH } = resizeCanvas();
+  const b = getBounds();
+  const rect = container.getBoundingClientRect();
+  const Wcss = rect.width, Hcss = rect.height;
+
+  let scale, offX, offY, minx, miny, W, H;
+  if (fitLock){
+    ({scale, offX, offY, minx, miny, W, H} = { ...fitLock });
+  } else {
+    scale = Math.min(1, Wcss/Math.max(1,b.W), Hcss/Math.max(1,b.H));
+    if (!isFinite(scale) || scale <= 0) scale = 0.1;
+    offX = (Wcss - b.W * scale) / 2;
+    offY = (Hcss - b.H * scale) / 2;
+    minx = b.minx; miny = b.miny; W = b.W; H = b.H;
+  }
+  ctx.setTransform(view.dpr,0,0,view.dpr,0,0);
+  ctx.clearRect(0,0,cssW,cssH);
+  ctx.translate(offX,offY); ctx.scale(scale,scale);
+
+  const current = { minx, miny, W, H, scale, offX, offY, dpr:view.dpr };
+  view = current; if (dragState.active && !fitLock) fitLock = { ...current };
+
+  // Hintergrund
+  ctx.fillStyle = "#0f1125"; ctx.fillRect(0,0,W,H);
+
+  // Grid + Mittelpunkte
+  ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--grid').trim() || '#6d78a8';
+  ctx.lineWidth = 1.5;
+  for (const c of cells){
+    const p=hexToPixel(c.q,c.r);
+    const Hs = Math.sqrt(3)*p.s;
+    const pts=[[p.x-p.s/2,p.y-Hs/2],[p.x+p.s/2,p.y-Hs/2],[p.x+p.s,p.y],[p.x+p.s/2,p.y+Hs/2],[p.x-p.s/2,p.y+Hs/2],[p.x-p.s,p.y]];
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0]-minx, pts[0][1]-miny);
+    for (let i=1;i<pts.length;i++) ctx.lineTo(pts[i][0]-minx, pts[i][1]-miny);
+    ctx.closePath(); ctx.stroke();
+
+    const cx=p.x-minx, cy=p.y-miny;
+    ctx.beginPath(); ctx.arc(cx, cy, Math.max(2, p.s*0.06), 0, Math.PI*2); ctx.fillStyle="#ffd54f"; ctx.fill();
+  }
+
+  // Ziel-Highlight (snapped)
+  if (dragState.active){
+    const idxHL = nearestCellIndex(dragState.pointerCssX, dragState.pointerCssY);
+    if (idxHL >= 0){
+      const c=cells[idxHL]; const p=hexToPixel(c.q,c.r);
+      const Hs=Math.sqrt(3)*p.s;
+      const pts=[[p.x-p.s/2,p.y-Hs/2],[p.x+p.s/2,p.y-Hs/2],[p.x+p.s,p.y],[p.x+p.s/2,p.y+Hs/2],[p.x-p.s/2,p.y+Hs/2],[p.x-p.s,p.y]];
+      ctx.beginPath();
+      ctx.moveTo(pts[0][0]-minx, pts[0][1]-miny);
+      for (let i=1;i<pts.length;i++) ctx.lineTo(pts[i][0]-minx, pts[i][1]-miny);
+      ctx.closePath();
+      ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--highlight').trim() || '#9ad1ff';
+      ctx.lineWidth = 2.5; ctx.stroke();
+    }
+  }
+
+  // Bereits platzierte Tiles
+  for (let i=0;i<cells.length;i++){
+    const c=cells[i]; if (!c.name) continue;
+    const isLocked = locked.has(i);
+    if (assets.ready && tryFrame(c.name)){
+      drawSprite(c.name, c.q, c.r, minx, miny, isLocked ? 1 : 0.95);
+    } else {
+      drawPlaceholder(c.name, c.q, c.r, minx, miny, isLocked ? 1 : 0.95);
+    }
+    if (isLocked){
+      const p=hexToPixel(c.q,c.r);
+      const x=p.x-minx, y=p.y-miny;
+      ctx.save(); ctx.globalAlpha=0.10; ctx.fillStyle="#6ec1ff";
+      ctx.beginPath(); ctx.arc(x, y, Math.max(3, p.s*0.45), 0, Math.PI*2); ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  // Cursor-Ghost
+  if (dragState.active && dragState.name){
+    const rectC=canvas.getBoundingClientRect();
+    const cssX=dragState.pointerCssX-rectC.left;
+    const cssY=dragState.pointerCssY-rectC.top;
+    const v=fitLock||view;
+    const mx=(cssX-v.offX)/v.scale;
+    const my=(cssY-v.offY)/v.scale;
+    if (assets.ready && tryFrame(dragState.name)){
+      drawSpriteAtPixel(dragState.name, mx + v.minx, my + v.miny, v.minx, v.miny, 0.85);
+    } else {
+      drawPlaceholderAtPixel(dragState.name, mx + v.minx, my + v.miny, v.minx, v.miny, 0.85);
+    }
+  }
+}
+
+/* untrim-aware sprite draw */
+function drawSprite(name, q, r, minx, miny, alpha=1){
+  const entry = tryFrame(name); if (!entry) return;
+  const f=entry.frame;
+  const sss=entry.spriteSourceSize || { x:0,y:0,w:f.w,h:f.h };
+  const src=entry.sourceSize      || { w:f.w,h:f.h };
+  const img=assets.image;
+
+  const destFullH = uiTileH;
+  const scale     = destFullH / src.h;
+  const destFullW = src.w * scale;
+  const destPartW = f.w  * scale;
+  const destPartH = f.h  * scale;
+  const offX = sss.x * scale;
+  const offY = sss.y * scale;
+
+  const p = hexToPixel(q, r);
+  const cx = p.x - minx, cy = p.y - miny;
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.imageSmoothingEnabled = true;
+  const dx = Math.round(cx - destFullW / 2 + offX);
+  const dy = Math.round(cy - destFullH / 2 + offY);
+  const sx = Math.round(f.x), sy = Math.round(f.y), sw = Math.round(f.w), sh = Math.round(f.h);
+  ctx.drawImage(img, sx, sy, sw, sh, dx, dy, Math.round(destPartW), Math.round(destPartH));
+  ctx.restore();
+}
+function drawSpriteAtPixel(name, px, py, minx, miny, alpha=1){
+  const entry = tryFrame(name); if (!entry) return;
+  const f=entry.frame;
+  const sss=entry.spriteSourceSize || { x:0,y:0,w:f.w,h:f.h };
+  const src=entry.sourceSize      || { w:f.w,h:f.h };
+  const img=assets.image;
+
+  const destFullH = uiTileH;
+  const scale     = destFullH / src.h;
+  const destFullW = src.w * scale;
+  const destPartW = f.w  * scale;
+  const destPartH = f.h  * scale;
+  const offX = sss.x * scale;
+  const offY = sss.y * scale;
+
+  const cx = px - minx, cy = py - miny;
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.imageSmoothingEnabled = true;
+  const dx = Math.round(cx - destFullW / 2 + offX);
+  const dy = Math.round(cy - destFullH / 2 + offY);
+  const sx = Math.round(f.x), sy = Math.round(f.y), sw = Math.round(f.w), sh = Math.round(f.h);
+  ctx.drawImage(img, sx, sy, sw, sh, dx, dy, Math.round(destPartW), Math.round(destPartH));
+  ctx.restore();
+}
+
+/* Platzhalter (Hex) */
+function drawPlaceholder(name, q, r, minx, miny, alpha=1){
+  const p=hexToPixel(q,r);
+  drawPlaceholderAtPixel(name, p.x, p.y, minx, miny, alpha);
+}
+function drawPlaceholderAtPixel(name, px, py, minx, miny, alpha=1){
+  const s=uiTileH/Math.sqrt(3);
+  const Hs=Math.sqrt(3)*s;
+  const x=px-minx, y=py-miny;
+  ctx.save();
+  ctx.globalAlpha=alpha;
+  ctx.fillStyle="#c2a900";
+  ctx.beginPath();
+  ctx.moveTo(x - s/2, y - Hs/2);
+  ctx.lineTo(x + s/2, y - Hs/2);
+  ctx.lineTo(x + s,   y);
+  ctx.lineTo(x + s/2, y + Hs/2);
+  ctx.lineTo(x - s/2, y + Hs/2);
+  ctx.lineTo(x - s,   y);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle="#111"; ctx.font="bold 13px ui-monospace"; ctx.textAlign="center";
+  ctx.fillText((name||'?').replace('.png',''), x, y+6);
+  ctx.restore();
+}
+
+/* Nächstgelegene Zelle */
+function nearestCellIndex(clientX, clientY){
+  const rect = canvas.getBoundingClientRect();
+  const cssX = clientX - rect.left, cssY = clientY - rect.top;
+  const v = fitLock || view;
+  const mx = (cssX - v.offX) / v.scale;
+  const my = (cssY - v.offY) / v.scale;
+  let best=-1, bestd=1e18;
+  for (let i=0;i<cells.length;i++){
+    const p=hexToPixel(cells[i].q,cells[i].r);
+    const px = (p.x - v.minx), py = (p.y - v.miny);
+    const d2 = (mx - px)*(mx - px) + (my - py)*(my - py);
+    if (d2 < bestd){ bestd = d2; best = i; }
+  }
+  return best;
+}
+/* ===== Deck & Spiel-Logik ===== */
+
+// Alle möglichen Tile-Namen (27 Stück)
+function allTileNames(){
+  const A=[1,5,9], B=[2,6,7], C=[3,4,8];
+  const arr=[];
+  for (const a of A) for (const b of B) for (const c of C){
+    const base = `A${a}_B${b}_C${c}`;
+    const name = assets.ready ? (assets.suffix ? base+assets.suffix : base) : base+'.png';
+    arr.push({ base, name });
+  }
+  return arr;
+}
+let deck = [];
+const deckUsed = new Set();
+function shuffle(arr){ for (let i=arr.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [arr[i],arr[j]]=[arr[j],arr[i]]; } }
+function initDeck(){ deck = allTileNames(); shuffle(deck); deckUsed.clear(); }
+
+// Laufende Spielwerte
+let currentTile = null;
+let currentTileBase = null;
+let placedIdxCurrent = -1;
+let round = 1;
+
+/* ===== Scoring – Take it Easy ===== */
+
+// A/B/C-Werte aus Dateinamen lesen (z. B. "A1_B6_C8" oder "...png")
+function parseABC(name){
+  if (!name) return null;
+  const base = name.endsWith('.png') ? name.slice(0, -4) : name;
+  const m = base.match(/A(\d+)_B(\d+)_C(\d+)/);
+  return m ? { A:+m[1], B:+m[2], C:+m[3] } : null;
+}
+
+// Zellen einer Linie je Achse sammeln
+function collectLine(axis, k){
+  if (axis === 'q') return cells.filter(c => c.q === k);
+  if (axis === 'r') return cells.filter(c => c.r === k);
+  // s = -q - r
+  return cells.filter(c => (-c.q - c.r) === k);
+}
+
+// Permutationen (für A/B/C)
+function permutations(arr){
+  if (arr.length <= 1) return [arr.slice()];
+  const res = [];
+  for (let i=0;i<arr.length;i++){
+    const head = arr[i];
+    const tail = arr.slice(0,i).concat(arr.slice(i+1));
+    for (const p of permutations(tail)) res.push([head, ...p]);
+  }
+  return res;
+}
+
+// Punktzahl für EINE Zuordnung von Achse->Key (z. B. {q:'A', r:'B', s:'C'})
+function computeScoreForMapping(axisToKey){
+  let total = 0;
+  const breakdown = [];
+  const axes = ['q','r','s']; // alle drei Richtungen (vertikal + 2 Diagonalen)
+
+  for (const axis of axes){
+    for (let k=-radius; k<=radius; k++){
+      const line = collectLine(axis, k);
+      if (!line.length) continue;
+
+      // Linie voll belegt und überall derselbe Wert?
+      let valid = true;
+      let v0 = null;
+      for (const cell of line){
+        if (!cell.name){ valid=false; break; }
+        const abc = parseABC(cell.name);
+        if (!abc){ valid=false; break; }
+        const val = abc[axisToKey[axis]];
+        if (v0 === null) v0 = val;
+        if (val !== v0){ valid=false; break; }
+      }
+      if (valid){
+        const pts = v0 * line.length;  // (Wert) × (Linienlänge) – z. B. 3×9, 4×6, …
+        total += pts;
+        breakdown.push({ axis, k, len: line.length, value: v0, points: pts });
+      }
+    }
+  }
+  return { total, breakdown, axisToKey };
+}
+
+// Beste Punktzahl über ALLE 6 Achsen-Zuordnungen ermitteln
+function bestScoreOverMappings(){
+  const perms = permutations(['A','B','C']); // 6 Stück
+  let best = null;
+  for (const perm of perms){
+    const mapping = { q: perm[0], r: perm[1], s: perm[2] };
+    const res = computeScoreForMapping(mapping);
+    if (!best || res.total > best.total) best = res;
+  }
+  return best;
+}
+
+// Spielende inkl. Punkteausgabe (Status)
+function finishGameWithScore(){
+  const { total, breakdown, axisToKey } = bestScoreOverMappings();
+
+  // letzte Nachricht im Status: Punktzahl anzeigen
+  setStatus(`Spiel beendet! Alle 19 Züge abgeschlossen.\nPunktzahl: ${total}`);
+
+  // UI: sperren & bereinigen
+  nextBtn.disabled = true;
+  nextBtn.style.opacity = '0.45';
+  lblCurrent.textContent = '—';
+  currentTile = null; currentTileBase = null; placedIdxCurrent = -1;
+  document.querySelectorAll('.tileBtn.current').forEach(b => b.classList.remove('current'));
+  buildPalette(assets.ready);
+
+  // Transparenz/Debug in der Konsole
+  console.log('Achsen-Zuordnung (q,r,s → A/B/C):', axisToKey);
+  if (console && console.table) console.table(breakdown);
+
+  draw();
+}
+
+/* ===== Deck-Zug (ohne Wiederholung) ===== */
+function drawRandomTile(){
+  // Sicherheitsnetz (sollte regulär über 19-Züge-Ende passieren)
+  if (deck.length === 0){
+    finishGameWithScore();
+    return;
+  }
+  const pick = deck.shift();
+  currentTile     = pick.name;
+  currentTileBase = pick.base;
+  placedIdxCurrent = -1;
+  deckUsed.add(pick.name);
+
+  lblCurrent.textContent = currentTileBase || '–';
+  setStatus("Neues Tile: " + currentTileBase);
+
+  buildPalette(assets.ready);
+  refreshCurrentTileVisuals();
+}
+
+/* ===== Palette (27 Tiles) mit Status-Badges ===== */
+function buildPalette(useSprites){
+  paletteEl.innerHTML = '';
+  const catalog = allTileNames();
+  for (const { base, name } of catalog){
+    const btn = document.createElement('div');
+    btn.className='tileBtn';
+    btn.title = base;
+    btn.setAttribute('data-name', name);
+
+    const previewWrap = document.createElement('div');
+    previewWrap.className = 'tilePreview';
+
+    if (useSprites && assets.ready && tryFrame(name)){
+      const entry = tryFrame(name).frame; const im = assets.image;
+      const previewW = 95;
+      const previewH = Math.max(70, Math.round(entry.h * (previewW/entry.w)));
+      const cCan = document.createElement('canvas'); cCan.width=previewW; cCan.height=previewH;
+      const g = cCan.getContext('2d'); g.imageSmoothingEnabled=true;
+      g.drawImage(im, entry.x, entry.y, entry.w, entry.h, 0, 0, previewW, previewH);
+      previewWrap.appendChild(cCan);
+    } else {
+      const ph = document.createElement('div');
+      ph.style.cssText = 'width:95px;height:80px;display:flex;align-items:center;justify-content:center;background:#0e1328;border:1px dashed #30407a;border-radius:8px;';
+      ph.textContent = base;
+      previewWrap.appendChild(ph);
+    }
+    btn.appendChild(previewWrap);
+
+    const status = document.createElement('div');
+    status.className = 'tileStatus';
+    const used = deckUsed.has(name);
+    status.classList.add(used ? 'bad' : 'ok');
+    status.innerHTML = `<span class="dot"></span><span class="label">${used ? '❌' : '✓'}</span>`;
+    btn.appendChild(status);
+
+    if (name === currentTile) btn.classList.add('current');
+
+    // Ziehen nur für das aktuelle & noch nicht platzierte Tile
+    btn.addEventListener('pointerdown', (ev)=>{
+      ev.preventDefault();
+      if (name !== currentTile) return;
+      if (placedIdxCurrent !== -1) return;
+      startPaletteDrag(name, ev);
+    });
+
+    paletteEl.appendChild(btn);
+  }
+}
+function refreshCurrentTileVisuals(){
+  const buttons = paletteEl.querySelectorAll('.tileBtn');
+  buttons.forEach(btn=>{
+    const name = btn.getAttribute('data-name');
+    btn.classList.toggle('current', name === currentTile);
+  });
+}
+
+/* ===== Drag & Drop – Palette → Board ===== */
+function startPaletteDrag(name, ev){
+  dragState.active = true;
+  dragState.source = 'palette';
+  dragState.name   = name;
+  dragState.pointerCssX = ev.clientX; dragState.pointerCssY = ev.clientY;
+  if (!fitLock) fitLock = { ...view };
+  draw();
+
+  function onMove(e){
+    dragState.pointerCssX = e.clientX; dragState.pointerCssY = e.clientY;
+    e.preventDefault(); draw();
+  }
+  function onUp(e){
+    const idx = nearestCellIndex(e.clientX, e.clientY);
+    if (idx >= 0 && canPlaceAtIndex(idx)){
+      cells[idx].name = name;
+      placedIdxCurrent = idx;
+      refreshCurrentTileVisuals();
+    }
+    cleanup();
+  }
+  function cleanup(){
+    dragState.active=false; dragState.source=null; dragState.name=null; dragState.fromIdx=-1;
+    fitLock=null; draw();
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', onUp);
+    window.removeEventListener('pointercancel', onUp);
+  }
+  window.addEventListener('pointermove', onMove);
+  window.addEventListener('pointerup', onUp);
+  window.addEventListener('pointercancel', onUp);
+}
+function canPlaceAtIndex(idx){ return idx >= 0 && !locked.has(idx) && !cells[idx].name; }
+
+/* ===== Drag & Drop – Board → Board ===== */
+canvas.addEventListener('pointerdown', (ev)=>{
+  if (ev.button !== 0) return;
+  const idx = nearestCellIndex(ev.clientX, ev.clientY);
+  if (idx < 0) return;
+
+  if (locked.has(idx)) return;
+  const tile = cells[idx].name; if (!tile) return;
+  if (tile !== currentTile) return;
+
+  dragState.active=true; dragState.source='board';
+  dragState.name=tile;   dragState.fromIdx=idx;
+  dragState.pointerCssX=ev.clientX; dragState.pointerCssY=ev.clientY;
+  if (!fitLock) fitLock = { ...view };
+  cells[idx].name=null;
+  placedIdxCurrent = -1;
+  refreshCurrentTileVisuals();
+  canvas.setPointerCapture && canvas.setPointerCapture(ev.pointerId);
+  ev.preventDefault(); draw();
+});
+canvas.addEventListener('pointermove', (ev)=>{
+  if (!dragState.active || dragState.source!=='board') return;
+  dragState.pointerCssX=ev.clientX; dragState.pointerCssY=ev.clientY;
+  ev.preventDefault(); draw();
+});
+function endBoardDrag(place){
+  if (!dragState.active || dragState.source!=='board') return;
+  const dropIdx = place ? nearestCellIndex(dragState.pointerCssX, dragState.pointerCssY) : -1;
+  const targetIdx = (place && canPlaceAtIndex(dropIdx)) ? dropIdx : dragState.fromIdx;
+  cells[targetIdx].name = dragState.name;
+  placedIdxCurrent = targetIdx;
+  dragState.active=false; dragState.source=null; dragState.name=null; dragState.fromIdx=-1;
+  fitLock=null; refreshCurrentTileVisuals(); draw();
+}
+canvas.addEventListener('pointerup',   ()=> endBoardDrag(true));
+canvas.addEventListener('pointercancel',()=> endBoardDrag(false));
+
+/* Kontextmenü: aktuelles (nicht gelocktes) Tile löschen */
+canvas.addEventListener('contextmenu', (ev)=>{
+  ev.preventDefault();
+  const idx = nearestCellIndex(ev.clientX, ev.clientY);
+  if (idx >= 0 && !locked.has(idx) && cells[idx].name === currentTile){
+    cells[idx].name = null;
+    placedIdxCurrent = -1;
+    refreshCurrentTileVisuals();
+    draw();
+  }
+});
+
+/* ===== Controls / Next-Move ===== */
+sizeRange.addEventListener('input', e=>{
+  uiTileH = parseInt(e.target.value,10);
+  sizeVal.textContent = uiTileH + 'px';
+  if (!dragState.active) fitLock = null;
+  draw();
+});
+function setStatus(text){ if (statusEl) statusEl.textContent = text; }
+function updateRoundLabel(){ lblRound.textContent = `${round} / ${cells.length}`; }
+function gameOver(){ return locked.size >= cells.length; }
+
+const locked = new Set();
+nextBtn.addEventListener('click', ()=>{
+  // Schon fertig?
+  if (gameOver()){ finishGameWithScore(); return; }
+
+  // Nicht platziert?
+  if (placedIdxCurrent === -1){
+    alert('Bitte das aktuelle Tile zuerst auf dem Board platzieren.');
+    return;
+  }
+
+  // Fixieren & weiter
+  locked.add(placedIdxCurrent);
+  round = Math.min(round + 1, cells.length);
+  updateRoundLabel();
+
+  // Ende nach 19 Zügen
+  if (gameOver()){
+    finishGameWithScore();
+    return;
+  }
+
+  drawRandomTile();
+  draw();
+});
+
+/* ===== Init ===== */
+sizeVal.textContent = uiTileH + 'px';
+updateRoundLabel();
+buildPalette(false);           // Platzhalter-Palette
+enableSprites();               // lädt Spritesheet & JSON (falls vorhanden)
+window.addEventListener('resize', ()=>{ resizeCanvas(); if(!dragState.active) fitLock=null; draw(); });
+initDeck();
+drawRandomTile();
+draw();
+</script>
+
+</body>
+</html>
